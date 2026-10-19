@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  social-streamlit-app:
+    build: .
+    container_name: fb_streamlit_app
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      - .:/app

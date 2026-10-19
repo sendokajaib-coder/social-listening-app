@@ -1,0 +1,4 @@
+apify-client==1.7.0
+openai==1.55.0
+python-dotenv==1.0.1
+streamlit==1.40.0

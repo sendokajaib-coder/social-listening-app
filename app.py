@@ -31,14 +31,14 @@ with st.sidebar:
     openai_key_input = st.text_input("OpenAI API Key", value=default_openai, type="password")
 
     st.markdown("---")
-    max_posts_per_platform = st.slider("Maksimal Postingan per Platform", min_value=3, max_value=15, value=5, step=1)
+    max_posts_per_platform = st.slider("Maksimal Postingan per Platform", min_value=3, max_value=1000, value=5, step=1)
     start_date = st.date_input(label="Pilih Tanggal Mulai (Start Date)", value=datetime.date.today())
 
 # Kolom Masukan Pencarian Pengguna
 keyword_query = st.text_input("Masukkan Kata Kunci Pencarian Umum:",
                               placeholder="Contoh: Kuliner Maluku / Pilkada Maluku")
 
-if st.button("🚀 Mulai Crawling Otomatis & Analisis", type="primary"):
+if st.button("Crawl", type="primary"):
     if not apify_key_input or not openai_key_input:
         st.error("⚠️ Mohon masukkan Apify API Key dan OpenAI API Key terlebih dahulu di sidebar atau file .env!")
     elif not keyword_query.strip():
@@ -84,10 +84,10 @@ if st.button("🚀 Mulai Crawling Otomatis & Analisis", type="primary"):
             },
             {
                 "name": "Instagram",
-                "actor_id": "apify/instagram-scraper",
+                "actor_id": "apify/instagram-search-scraper",
                 "input": {
                     "search": keyword_query,
-                    "searchType": "hashtag",
+                    "searchType": "popular",
                     "resultsLimit": max_posts_per_platform,
                 }
             }

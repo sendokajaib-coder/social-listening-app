@@ -86,9 +86,10 @@ if st.button("Crawl", type="primary"):
                 "name": "Instagram",
                 "actor_id": "apify/instagram-search-scraper",
                 "input": {
-                    "search": keyword_query,
+                    "keywords": [keyword_query],
+                    "maxResultsPerKeyword": max_posts_per_platform,
                     "searchType": "popular",
-                    "Limit": max_posts_per_platform,
+                    "search":keyword_query
                 }
             }
         ]

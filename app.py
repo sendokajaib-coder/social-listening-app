@@ -88,7 +88,7 @@ if st.button("Crawl", type="primary"):
                 "input": {
                     "search": keyword_query,
                     "searchType": "popular",
-                    "resultsLimit": max_posts_per_platform,
+                    "Limit": max_posts_per_platform,
                 }
             }
         ]

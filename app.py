@@ -135,10 +135,13 @@ if app_mode == "Crawl & Analisis Baru":
                         for index, post in enumerate(all_combined_items):
                             source = post.get("_source_platform", "Unknown")
 
-                            # Ekstraksi teks aman lintas platform (termasuk penanganan struktur TikTok)
+                            # Ekstraksi teks aman lintas platform (diperbarui untuk Instagram: caption, text, dll)
                             text_content = (
-                                    post.get("text", "") or
                                     post.get("caption", "") or
+                                    post.get("text", "") or
+                                    post.get("message", "") or
+                                    post.get("postText", "") or
+                                    post.get("story", "") or
                                     post.get("full_text", "") or
                                     post.get("desc", "") or
                                     post.get("title", "") or
@@ -182,7 +185,7 @@ Buatkan ringkasan eksekutif lintas platform yang mencakup:
 
                         summary_result = response.choices[0].message.content
 
-                        # Simpan hasil ke file JSON otomatis agar bisa dibuka di Viewer
+                        # Simpan hasil ke file JSON otomatis
                         timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                         safe_query = "".join(c if c.isalnum() else "_" for c in keyword_query)[:25]
                         filename = f"{timestamp_str}_{safe_query}.json"
@@ -204,7 +207,7 @@ Buatkan ringkasan eksekutif lintas platform yang mencakup:
                         st.markdown("### 📋 Hasil Ringkasan & Sentimen AI Lintas Platform")
                         st.markdown(summary_result)
 
-                        # Tombol Save / Download File Laporan
+                        # Tombol Unduh Laporan
                         st.markdown("---")
                         col_dl1, col_dl2 = st.columns(2)
                         with col_dl1:
@@ -215,15 +218,18 @@ Buatkan ringkasan eksekutif lintas platform yang mencakup:
                                 mime="text/markdown"
                             )
 
-                        # Menyiapkan data tabel dengan ekstraksi TikTok yang diperbarui
+                        # Menyiapkan data tabel
                         table_data = []
                         for i, post in enumerate(all_combined_items):
                             source = post.get("_source_platform", "Unknown")
 
-                            # Ekstraksi Teks
+                            # Ekstraksi Teks (prioritaskan caption untuk IG)
                             text_content = (
-                                    post.get("text", "") or
                                     post.get("caption", "") or
+                                    post.get("text", "") or
+                                    post.get("message", "") or
+                                    post.get("postText", "") or
+                                    post.get("story", "") or
                                     post.get("full_text", "") or
                                     post.get("desc", "") or
                                     post.get("title", "") or
@@ -231,17 +237,23 @@ Buatkan ringkasan eksekutif lintas platform yang mencakup:
                                     post.get("snippet", "")
                             )
 
-                            # Ekstraksi URL (Khusus TikTok: webVideoUrl / url)
+                            # Ekstraksi URL (prioritaskan url untuk IG)
                             url_content = (
-                                    post.get("webVideoUrl", "") or
                                     post.get("url", "") or
-                                    post.get("webUrl", "") or
                                     post.get("postUrl", "") or
+                                    post.get("webVideoUrl", "") or
+                                    post.get("webUrl", "") or
                                     post.get("link", "")
                             )
 
-                            # Ekstraksi Author (Khusus TikTok: authorMeta / author)
-                            author_raw = post.get("authorMeta", "") or post.get("author", "")
+                            # Ekstraksi Author (prioritaskan ownerUsername / ownerFullName untuk IG)
+                            author_raw = (
+                                    post.get("ownerUsername", "") or
+                                    post.get("ownerFullName", "") or
+                                    post.get("authorMeta", "") or
+                                    post.get("author", "") or
+                                    post.get("user", "")
+                            )
                             if isinstance(author_raw, dict):
                                 author = author_raw.get("nickName", "") or author_raw.get("uniqueId",
                                                                                           "") or author_raw.get("name",
@@ -250,8 +262,7 @@ Buatkan ringkasan eksekutif lintas platform yang mencakup:
                                 author = (
                                         author_raw or
                                         post.get("username", "") or
-                                        post.get("ownerUsername", "") or
-                                        post.get("user", "")
+                                        post.get("profileName", "")
                                 )
 
                             table_data.append({
@@ -316,8 +327,11 @@ elif app_mode == "Viewer Riwayat Laporan":
                     for i, post in enumerate(items):
                         source = post.get("_source_platform", "Unknown")
                         text_content = (
-                                post.get("text", "") or
                                 post.get("caption", "") or
+                                post.get("text", "") or
+                                post.get("message", "") or
+                                post.get("postText", "") or
+                                post.get("story", "") or
                                 post.get("full_text", "") or
                                 post.get("desc", "") or
                                 post.get("title", "") or
@@ -325,13 +339,19 @@ elif app_mode == "Viewer Riwayat Laporan":
                                 post.get("snippet", "")
                         )
                         url_content = (
-                                post.get("webVideoUrl", "") or
                                 post.get("url", "") or
-                                post.get("webUrl", "") or
                                 post.get("postUrl", "") or
+                                post.get("webVideoUrl", "") or
+                                post.get("webUrl", "") or
                                 post.get("link", "")
                         )
-                        author_raw = post.get("authorMeta", "") or post.get("author", "")
+                        author_raw = (
+                                post.get("ownerUsername", "") or
+                                post.get("ownerFullName", "") or
+                                post.get("authorMeta", "") or
+                                post.get("author", "") or
+                                post.get("user", "")
+                        )
                         if isinstance(author_raw, dict):
                             author = author_raw.get("nickName", "") or author_raw.get("uniqueId", "") or author_raw.get(
                                 "name", "")
@@ -339,8 +359,7 @@ elif app_mode == "Viewer Riwayat Laporan":
                             author = (
                                     author_raw or
                                     post.get("username", "") or
-                                    post.get("ownerUsername", "") or
-                                    post.get("user", "")
+                                    post.get("profileName", "")
                             )
 
                         table_data.append({
@@ -354,7 +373,6 @@ elif app_mode == "Viewer Riwayat Laporan":
                     df_raw = pd.DataFrame(table_data)
                     st.dataframe(df_raw, use_container_width=True)
 
-                    # Tombol unduh ulang dari viewer
                     csv_data = df_raw.to_csv(index=False).encode('utf-8')
                     st.download_button(
                         label="📥 Unduh Ulang CSV dari Riwayat Ini",

@@ -1,11 +1,8 @@
 import os
 import streamlit as st
 from dotenv import load_dotenv
-from apify_client import ApifyClient
-from openai import OpenAI
 import datetime
-import pandas as pd
-import json
+from social_services import SocialMediaService, ReportRepository
 
 # Memuat variabel lingkungan dari file .env
 load_dotenv()
@@ -17,9 +14,8 @@ st.set_page_config(
     layout="wide"
 )
 
-# Folder penyimpanan riwayat laporan
-SAVE_DIR = "saved_reports"
-os.makedirs(SAVE_DIR, exist_ok=True)
+# Inisialisasi Repository
+repository = ReportRepository("saved_reports")
 
 st.title("📊 Social Media Listening & Sentiment Assistant")
 st.markdown(
@@ -57,151 +53,32 @@ if app_mode == "Crawl & Analisis Baru":
             st.warning("⚠️ Kata kunci tidak boleh kosong!")
         else:
             try:
-                apify_client = ApifyClient(apify_key_input)
-                openai_client = OpenAI(api_key=openai_key_input)
+                service = SocialMediaService(apify_key_input, openai_key_input)
             except Exception as e:
-                st.error(f"❌ Gagal menginisialisasi API Client: {e}")
+                st.error(f"❌ Gagal menginisialisasi Service: {e}")
                 st.stop()
 
-            all_combined_items = []
-
-            # Daftar platform dan konfigurasi actor
-            platforms_config = [
-                {
-                    "name": "Facebook",
-                    "actor_id": "scraper_one/facebook-posts-search",
-                    "input": {
-                        "query": keyword_query,
-                        "resultsCount": max_posts_per_platform,
-                        "startDate": str(start_date),
-                    }
-                },
-                {
-                    "name": "TikTok",
-                    "actor_id": "clockworks/tiktok-scraper",
-                    "input": {
-                        "searchQueries": [keyword_query],
-                        "resultsPerPage": max_posts_per_platform,
-                        "shouldDownloadVideos": False,
-                    }
-                },
-                {
-                    "name": "X (Twitter)",
-                    "actor_id": "scraper_one/x-posts-search",
-                    "input": {
-                        "query": keyword_query,
-                        "resultsCount": max_posts_per_platform,
-                        "startDate": str(start_date),
-                    }
-                },
-                {
-                    "name": "Instagram",
-                    "actor_id": "apify/instagram-search-scraper",
-                    "input": {
-                        "keywords": [keyword_query],
-                        "maxResultsPerKeyword": max_posts_per_platform,
-                        "searchType": "popular",
-                        "search": keyword_query
-                    }
-                }
-            ]
-
-            # Proses 1: Menjalankan Crawling Otomatis ke Semua Platform
-            with st.status("🔄 Sedang menjalankan crawling otomatis lintas platform...", expanded=True) as status:
-                for p in platforms_config:
-                    p_name = p["name"]
-                    st.write(f"Menjalankan Apify Actor untuk **{p_name}**...")
-                    try:
-                        run = apify_client.actor(p["actor_id"]).call(run_input=p["input"])
-                        dataset_items = apify_client.dataset(run["defaultDatasetId"]).list_items().items
-
-                        for item in dataset_items:
-                            item["_source_platform"] = p_name
-
-                        all_combined_items.extend(dataset_items)
-                        st.write(f"✅ Berhasil menarik {len(dataset_items)} item dari {p_name}.")
-                    except Exception as e:
-                        st.warning(f"⚠️ Gagal menarik data dari {p_name}: {e}")
-
-                status.update(
+            # Proses 1: Crawling Lintas Platform
+            status_box = st.status("🔄 Sedang menjalankan crawling otomatis lintas platform...", expanded=True)
+            with status_box:
+                all_combined_items = service.crawl_all_platforms(
+                    query=keyword_query,
+                    max_posts=max_posts_per_platform,
+                    start_date=str(start_date),
+                    status_callback=st.write
+                )
+                status_box.update(
                     label=f"Crawling Selesai! Total {len(all_combined_items)} data terkumpul. Menganalisis dengan OpenAI...",
-                    state="running")
+                    state="running"
+                )
 
-            # Proses 2: Menganalisis & Merangkum dengan OpenAI GPT
+            # Proses 2: Analisis AI & Penyimpanan
             if all_combined_items:
                 with st.spinner("🤖 OpenAI sedang menyusun ringkasan eksekutif dan analisis lintas platform..."):
                     try:
-                        posts_text_collection = []
-                        for index, post in enumerate(all_combined_items):
-                            source = post.get("_source_platform", "Unknown")
+                        summary_result = service.analyze_with_ai(keyword_query, all_combined_items)
+                        filename, filepath = repository.save_report(keyword_query, summary_result, all_combined_items)
 
-                            # Ekstraksi teks aman lintas platform (diperbarui untuk Instagram: caption, text, dll)
-                            text_content = (
-                                    post.get("caption", "") or
-                                    post.get("text", "") or
-                                    post.get("message", "") or
-                                    post.get("postText", "") or
-                                    post.get("story", "") or
-                                    post.get("full_text", "") or
-                                    post.get("desc", "") or
-                                    post.get("title", "") or
-                                    post.get("pagemessage", "") or
-                                    post.get("snippet", "")
-                            )
-                            if text_content.strip():
-                                posts_text_collection.append(
-                                    f"- [{source}] Postingan {index + 1}: {text_content[:400]}")
-
-                        combined_text = "\n".join(posts_text_collection[:30])
-
-                        system_prompt = (
-                            "Anda adalah seorang Analis Media Sosial (Social Media Intelligence Analyst). "
-                            "Tugas Anda adalah merangkum dan menarik kesimpulan naratif dari opini publik, "
-                            "tren, atau sentimen yang sedang hangat berdasarkan data postingan dari berbagai platform media sosial. "
-                            "Sertakan nama akun/tokoh yang menonjol beserta link-nya jika tersedia pada data, serta hitung persentase sentimen secara keseluruhan."
-                        )
-
-                        user_prompt = f"""
-Berikut adalah daftar postingan gabungan dari berbagai platform (Facebook, TikTok, X, Instagram) mengenai pencarian: "{keyword_query}"
-
---- DATA POSTINGAN PUBLIK ---
-{combined_text}
------------------------------
-
-Buatkan ringkasan eksekutif lintas platform yang mencakup:
-1. Inti pembahasan utama dari publik di berbagai platform tersebut.
-2. Sentimen umum (Positif, Negatif, atau Netral) beserta persentasenya secara menyeluruh.
-3. Poin-poin temuan penting, perbandingan tren antar platform (jika ada), serta akun/tokoh menonjol beserta link-nya jika tersedia.
-"""
-
-                        response = openai_client.chat.completions.create(
-                            model="gpt-4o-mini",
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt}
-                            ],
-                            temperature=0.4
-                        )
-
-                        summary_result = response.choices[0].message.content
-
-                        # Simpan hasil ke file JSON otomatis
-                        timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                        safe_query = "".join(c if c.isalnum() else "_" for c in keyword_query)[:25]
-                        filename = f"{timestamp_str}_{safe_query}.json"
-                        filepath = os.path.join(SAVE_DIR, filename)
-
-                        report_data = {
-                            "query": keyword_query,
-                            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "summary": summary_result,
-                            "items": all_combined_items
-                        }
-
-                        with open(filepath, "w", encoding="utf-8") as f:
-                            json.dump(report_data, f, ensure_ascii=False, indent=4)
-
-                        # Menampilkan Hasil Analisis di Antarmuka Web
                         st.success(f"Analisis Berhasil Diselesaikan & Disimpan ke Riwayat ({filename})!")
 
                         st.markdown("### 📋 Hasil Ringkasan & Sentimen AI Lintas Platform")
@@ -211,6 +88,7 @@ Buatkan ringkasan eksekutif lintas platform yang mencakup:
                         st.markdown("---")
                         col_dl1, col_dl2 = st.columns(2)
                         with col_dl1:
+                            safe_query = "".join(c if c.isalnum() else "_" for c in keyword_query)[:25]
                             st.download_button(
                                 label="📥 Unduh Ringkasan AI (Markdown)",
                                 data=summary_result,
@@ -218,62 +96,7 @@ Buatkan ringkasan eksekutif lintas platform yang mencakup:
                                 mime="text/markdown"
                             )
 
-                        # Menyiapkan data tabel
-                        table_data = []
-                        for i, post in enumerate(all_combined_items):
-                            source = post.get("_source_platform", "Unknown")
-
-                            # Ekstraksi Teks (prioritaskan caption untuk IG)
-                            text_content = (
-                                    post.get("caption", "") or
-                                    post.get("text", "") or
-                                    post.get("message", "") or
-                                    post.get("postText", "") or
-                                    post.get("story", "") or
-                                    post.get("full_text", "") or
-                                    post.get("desc", "") or
-                                    post.get("title", "") or
-                                    post.get("pagemessage", "") or
-                                    post.get("snippet", "")
-                            )
-
-                            # Ekstraksi URL (prioritaskan url untuk IG)
-                            url_content = (
-                                    post.get("url", "") or
-                                    post.get("postUrl", "") or
-                                    post.get("webVideoUrl", "") or
-                                    post.get("webUrl", "") or
-                                    post.get("link", "")
-                            )
-
-                            # Ekstraksi Author (prioritaskan ownerUsername / ownerFullName untuk IG)
-                            author_raw = (
-                                    post.get("ownerUsername", "") or
-                                    post.get("ownerFullName", "") or
-                                    post.get("authorMeta", "") or
-                                    post.get("author", "") or
-                                    post.get("user", "")
-                            )
-                            if isinstance(author_raw, dict):
-                                author = author_raw.get("nickName", "") or author_raw.get("uniqueId",
-                                                                                          "") or author_raw.get("name",
-                                                                                                                "")
-                            else:
-                                author = (
-                                        author_raw or
-                                        post.get("username", "") or
-                                        post.get("profileName", "")
-                                )
-
-                            table_data.append({
-                                "No": i + 1,
-                                "Platform": source,
-                                "Author / Akun": str(author),
-                                "Teks / Konten": text_content,
-                                "Link": url_content
-                            })
-
-                        df_raw = pd.DataFrame(table_data)
+                        df_raw = repository.parse_items_to_dataframe(all_combined_items)
 
                         with col_dl2:
                             csv_data = df_raw.to_csv(index=False).encode('utf-8')
@@ -298,7 +121,7 @@ Buatkan ringkasan eksekutif lintas platform yang mencakup:
 elif app_mode == "Viewer Riwayat Laporan":
     st.header("📂 Riwayat Laporan Tersimpan")
 
-    saved_files = sorted([f for f in os.listdir(SAVE_DIR) if f.endswith(".json")], reverse=True)
+    saved_files = repository.get_saved_files()
 
     if not saved_files:
         st.info("Belum ada riwayat laporan yang tersimpan. Silakan lakukan pencarian di menu 'Crawl & Analisis Baru'.")
@@ -306,10 +129,8 @@ elif app_mode == "Viewer Riwayat Laporan":
         selected_file = st.selectbox("Pilih Riwayat Berdasarkan Waktu & Kata Kunci:", saved_files)
 
         if selected_file:
-            filepath = os.path.join(SAVE_DIR, selected_file)
             try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    saved_data = json.load(f)
+                saved_data = repository.load_report(selected_file)
 
                 st.markdown(f"**Kata Kunci:** `{saved_data.get('query')}`")
                 st.markdown(f"**Waktu Crawling:** `{saved_data.get('timestamp')}`")
@@ -323,54 +144,7 @@ elif app_mode == "Viewer Riwayat Laporan":
                     st.markdown("---")
                     st.markdown(f"### 🔍 Tabel Data Mentah ({len(items)} Item)")
 
-                    table_data = []
-                    for i, post in enumerate(items):
-                        source = post.get("_source_platform", "Unknown")
-                        text_content = (
-                                post.get("caption", "") or
-                                post.get("text", "") or
-                                post.get("message", "") or
-                                post.get("postText", "") or
-                                post.get("story", "") or
-                                post.get("full_text", "") or
-                                post.get("desc", "") or
-                                post.get("title", "") or
-                                post.get("pagemessage", "") or
-                                post.get("snippet", "")
-                        )
-                        url_content = (
-                                post.get("url", "") or
-                                post.get("postUrl", "") or
-                                post.get("webVideoUrl", "") or
-                                post.get("webUrl", "") or
-                                post.get("link", "")
-                        )
-                        author_raw = (
-                                post.get("ownerUsername", "") or
-                                post.get("ownerFullName", "") or
-                                post.get("authorMeta", "") or
-                                post.get("author", "") or
-                                post.get("user", "")
-                        )
-                        if isinstance(author_raw, dict):
-                            author = author_raw.get("nickName", "") or author_raw.get("uniqueId", "") or author_raw.get(
-                                "name", "")
-                        else:
-                            author = (
-                                    author_raw or
-                                    post.get("username", "") or
-                                    post.get("profileName", "")
-                            )
-
-                        table_data.append({
-                            "No": i + 1,
-                            "Platform": source,
-                            "Author / Akun": str(author),
-                            "Teks / Konten": text_content,
-                            "Link": url_content
-                        })
-
-                    df_raw = pd.DataFrame(table_data)
+                    df_raw = repository.parse_items_to_dataframe(items)
                     st.dataframe(df_raw, use_container_width=True)
 
                     csv_data = df_raw.to_csv(index=False).encode('utf-8')
